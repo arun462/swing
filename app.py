@@ -3,9 +3,14 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 
-st.title("📈 Dynamic Swing Trade Analyzer (Manual Indicators)")
+st.title("📈 Multi-Stock Swing Trade Analyzer (Manual Indicators)")
 
-symbol = st.text_input("Enter NSE stock symbol (e.g., BANKINDIA.NS):", value="BANKINDIA.NS")
+symbols_input = st.text_area(
+    "Enter NSE stock symbols (comma-separated or one per line, e.g., BANKINDIA.NS, RELIANCE.NS):",
+    value="BANKINDIA.NS, RELIANCE.NS"
+)
+
+symbols = [s.strip().upper() for s in symbols_input.replace("\n", ",").split(",") if s.strip()]
 
 def ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -19,7 +24,8 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-if symbol:
+for symbol in symbols:
+    st.header(f"📊 Analysis for {symbol}")
     data = yf.download(symbol, period="6mo", interval="1d")
     
     if not data.empty:
@@ -45,7 +51,7 @@ if symbol:
             except (TypeError, ValueError):
                 continue  # skip invalid entry
 
-            future = data.loc[entry_date:].head(20)  # look ahead up to 20 trading days
+            future = data.loc[entry_date:].head(20)  # up to 20 trading days
             exit_idx, exit_price = None, None
 
             for tup in future.itertuples():
@@ -67,7 +73,7 @@ if symbol:
                     exit_price = None
 
             if pd.isna(entry_price) or pd.isna(exit_price):
-                continue  # skip if invalid prices
+                continue
 
             hold_days = (exit_idx - entry_date).days
             pnl = exit_price - entry_price
@@ -82,7 +88,7 @@ if symbol:
             })
 
         if swing_trades:
-            st.subheader("📋 Detected Swing Trades")
+            st.subheader(f"🗂 Detected Swing Trades for {symbol}")
             trades_df = pd.DataFrame(swing_trades)
             st.dataframe(trades_df)
 
@@ -90,9 +96,9 @@ if symbol:
             avg_pnl = trades_df['PnL'].mean()
             st.info(f"Average hold period: {avg_hold:.1f} days | Average PnL: ₹{avg_pnl:.2f}")
         else:
-            st.warning("No swing trades detected in the selected period.")
+            st.warning(f"No swing trades detected for {symbol} in the selected period.")
 
-        # ✅ Check current candle for entry signal
+        # ✅ Current entry signal & potential future setup
         latest = data.iloc[-1]
         if len(data) >= 2:
             prev = data.iloc[-2]
@@ -103,21 +109,26 @@ if symbol:
             )
 
             if current_entry:
-                st.success(f"✅ Swing Entry Signal Detected on {latest.name.strftime('%Y-%m-%d')}! Consider entering the trade.")
+                st.success(f"✅ Current swing entry signal detected on {latest.name.strftime('%Y-%m-%d')} for {symbol}!")
             else:
-                st.info(f"❌ No swing entry signal on the latest candle ({latest.name.strftime('%Y-%m-%d')}).")
+                st.info(f"❌ No swing entry signal on latest candle ({latest.name.strftime('%Y-%m-%d')}) for {symbol}.")
+
+            ema_gap = latest['EMA20'] - latest['EMA50']
+            prev_ema_gap = prev['EMA20'] - prev['EMA50']
+            if (ema_gap > prev_ema_gap) and (latest['RSI'] > prev['RSI']) and (latest['RSI'] > 35):
+                st.warning(f"⚠️ EMAs converging with rising RSI → possible entry forming soon for {symbol} (gap: {ema_gap:.2f})")
         else:
-            st.warning("Not enough data for entry signal check.")
+            st.warning(f"Not enough data for entry signal check for {symbol}.")
 
         cols_to_plot = [col for col in ['Close', 'EMA20', 'EMA50'] if col in data.columns]
         if cols_to_plot:
             data_clean = data[cols_to_plot].dropna()
             if not data_clean.empty:
-                st.subheader("📊 Closing Price & EMAs")
+                st.subheader(f"📈 Price & EMAs for {symbol}")
                 st.line_chart(data_clean)
             else:
-                st.warning("Not enough data to plot after cleaning.")
+                st.warning(f"Not enough data to plot after cleaning for {symbol}.")
         else:
-            st.warning("No columns available for plotting.")
+            st.warning(f"No columns available for plotting for {symbol}.")
     else:
-        st.warning("No data found for this symbol. Check your input.")
+        st.error(f"No data found for {symbol}. Check the symbol spelling or if it’s valid on NSE.")
