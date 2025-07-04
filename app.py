@@ -98,14 +98,25 @@ for symbol in symbols:
         else:
             st.warning(f"No swing trades detected for {symbol} in the selected period.")
 
-        # ✅ Current entry signal & potential future setup
+        # ✅ Check current entry signal & potential future setup
         latest = data.iloc[-1]
         if len(data) >= 2:
             prev = data.iloc[-2]
+            try:
+                ema20_latest = float(latest['EMA20'])
+                ema50_latest = float(latest['EMA50'])
+                ema20_prev = float(prev['EMA20'])
+                ema50_prev = float(prev['EMA50'])
+                rsi_latest = float(latest['RSI'])
+                rsi_prev = float(prev['RSI'])
+            except (TypeError, ValueError, KeyError):
+                st.error(f"⚠️ Skipping {symbol}: invalid data for current signal check.")
+                continue
+
             current_entry = (
-                (latest['EMA20'] > latest['EMA50']) and
-                (prev['EMA20'] <= prev['EMA50']) and
-                (latest['RSI'] > 40)
+                (ema20_latest > ema50_latest) and
+                (ema20_prev <= ema50_prev) and
+                (rsi_latest > 40)
             )
 
             if current_entry:
@@ -113,9 +124,9 @@ for symbol in symbols:
             else:
                 st.info(f"❌ No swing entry signal on latest candle ({latest.name.strftime('%Y-%m-%d')}) for {symbol}.")
 
-            ema_gap = latest['EMA20'] - latest['EMA50']
-            prev_ema_gap = prev['EMA20'] - prev['EMA50']
-            if (ema_gap > prev_ema_gap) and (latest['RSI'] > prev['RSI']) and (latest['RSI'] > 35):
+            ema_gap = ema20_latest - ema50_latest
+            prev_ema_gap = ema20_prev - ema50_prev
+            if (ema_gap > prev_ema_gap) and (rsi_latest > rsi_prev) and (rsi_latest > 35):
                 st.warning(f"⚠️ EMAs converging with rising RSI → possible entry forming soon for {symbol} (gap: {ema_gap:.2f})")
         else:
             st.warning(f"Not enough data for entry signal check for {symbol}.")
