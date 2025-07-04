@@ -2,8 +2,17 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
+import logging
 
-st.title("📈 Multi-Stock Swing Trade Analyzer (Manual Indicators)")
+# ✅ Set up logging to file with timestamps
+logging.basicConfig(
+    filename="swing_trade_analyzer.log",
+    filemode="a",
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+st.title("📈 Multi-Stock Swing Trade Analyzer with Logging")
 
 symbols_input = st.text_area(
     "Enter NSE stock symbols (comma-separated or one per line, e.g., BANKINDIA.NS, RELIANCE.NS):",
@@ -26,9 +35,14 @@ def rsi(series, period=14):
 
 for symbol in symbols:
     st.header(f"📊 Analysis for {symbol}")
-    data = yf.download(symbol, period="6mo", interval="1d")
-    
-    if not data.empty:
+    try:
+        data = yf.download(symbol, period="6mo", interval="1d")
+        if data.empty:
+            st.error(f"No data found for {symbol}. Check the symbol spelling or if it’s valid on NSE.")
+            logging.warning(f"No data found for {symbol}")
+            continue
+
+        logging.info(f"Downloaded data for {symbol}")
         data['EMA20'] = ema(data['Close'], 20)
         data['EMA50'] = ema(data['Close'], 50)
         data['RSI'] = rsi(data['Close'])
@@ -49,14 +63,15 @@ for symbol in symbols:
             try:
                 entry_price = float(entry_price)
             except (TypeError, ValueError):
-                continue  # skip invalid entry
+                logging.warning(f"Invalid entry price for {symbol} at {entry_date}")
+                continue
 
             future = data.loc[entry_date:].head(20)  # up to 20 trading days
             exit_idx, exit_price = None, None
 
             for tup in future.itertuples():
                 if None in (getattr(tup, "RSI", None), getattr(tup, "EMA20", None), getattr(tup, "EMA50", None)):
-                    continue  # skip rows missing indicators
+                    continue
                 if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
                     exit_idx = tup.Index
                     try:
@@ -95,10 +110,12 @@ for symbol in symbols:
             avg_hold = trades_df['Holding Days'].mean()
             avg_pnl = trades_df['PnL'].mean()
             st.info(f"Average hold period: {avg_hold:.1f} days | Average PnL: ₹{avg_pnl:.2f}")
+            logging.info(f"Detected {len(swing_trades)} swing trades for {symbol}")
         else:
             st.warning(f"No swing trades detected for {symbol} in the selected period.")
+            logging.info(f"No swing trades detected for {symbol}")
 
-        # ✅ Check current entry signal & potential future setup
+        # ✅ Current entry signal & potential future setup
         latest = data.iloc[-1]
         if len(data) >= 2:
             prev = data.iloc[-2]
@@ -111,6 +128,7 @@ for symbol in symbols:
                 rsi_prev = float(prev['RSI'])
             except (TypeError, ValueError, KeyError):
                 st.error(f"⚠️ Skipping {symbol}: invalid data for current signal check.")
+                logging.warning(f"Invalid data for signal check for {symbol}")
                 continue
 
             current_entry = (
@@ -121,15 +139,19 @@ for symbol in symbols:
 
             if current_entry:
                 st.success(f"✅ Current swing entry signal detected on {latest.name.strftime('%Y-%m-%d')} for {symbol}!")
+                logging.info(f"Current entry signal detected for {symbol}")
             else:
                 st.info(f"❌ No swing entry signal on latest candle ({latest.name.strftime('%Y-%m-%d')}) for {symbol}.")
+                logging.info(f"No current entry signal for {symbol}")
 
             ema_gap = ema20_latest - ema50_latest
             prev_ema_gap = ema20_prev - ema50_prev
             if (ema_gap > prev_ema_gap) and (rsi_latest > rsi_prev) and (rsi_latest > 35):
                 st.warning(f"⚠️ EMAs converging with rising RSI → possible entry forming soon for {symbol} (gap: {ema_gap:.2f})")
+                logging.info(f"Possible entry forming soon for {symbol} (gap: {ema_gap:.2f})")
         else:
             st.warning(f"Not enough data for entry signal check for {symbol}.")
+            logging.warning(f"Insufficient data for entry check for {symbol}")
 
         cols_to_plot = [col for col in ['Close', 'EMA20', 'EMA50'] if col in data.columns]
         if cols_to_plot:
@@ -139,7 +161,10 @@ for symbol in symbols:
                 st.line_chart(data_clean)
             else:
                 st.warning(f"Not enough data to plot after cleaning for {symbol}.")
+                logging.warning(f"No data to plot for {symbol}")
         else:
             st.warning(f"No columns available for plotting for {symbol}.")
-    else:
-        st.error(f"No data found for {symbol}. Check the symbol spelling or if it’s valid on NSE.")
+            logging.warning(f"No columns to plot for {symbol}")
+    except Exception as e:
+        st.error(f"❌ Error analyzing {symbol}: {e}")
+        logging.error(f"Error analyzing {symbol}: {e}")
