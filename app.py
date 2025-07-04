@@ -92,6 +92,23 @@ if symbol:
         else:
             st.warning("No swing trades detected in the selected period.")
 
+        # ✅ Check current candle for entry signal
+        latest = data.iloc[-1]
+        if len(data) >= 2:
+            prev = data.iloc[-2]
+            current_entry = (
+                (latest['EMA20'] > latest['EMA50']) and
+                (prev['EMA20'] <= prev['EMA50']) and
+                (latest['RSI'] > 40)
+            )
+
+            if current_entry:
+                st.success(f"✅ Swing Entry Signal Detected on {latest.name.strftime('%Y-%m-%d')}! Consider entering the trade.")
+            else:
+                st.info(f"❌ No swing entry signal on the latest candle ({latest.name.strftime('%Y-%m-%d')}).")
+        else:
+            st.warning("Not enough data for entry signal check.")
+
         cols_to_plot = [col for col in ['Close', 'EMA20', 'EMA50'] if col in data.columns]
         if cols_to_plot:
             data_clean = data[cols_to_plot].dropna()
