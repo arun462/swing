@@ -40,6 +40,11 @@ if symbol:
         for buy_idx in data.index[data['BuySignal']]:
             entry_date = buy_idx
             entry_price = data.loc[entry_date, 'Close']
+            try:
+                entry_price = float(entry_price)
+            except (TypeError, ValueError):
+                continue  # skip invalid entry
+
             future = data.loc[entry_date:].head(20)  # look ahead up to 20 trading days
             exit_idx, exit_price = None, None
 
@@ -48,12 +53,21 @@ if symbol:
                     continue  # skip rows missing indicators
                 if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
                     exit_idx = tup.Index
-                    exit_price = tup.Close
+                    try:
+                        exit_price = float(tup.Close)
+                    except (TypeError, ValueError):
+                        exit_price = None
                     break
 
             if exit_idx is None:
                 exit_idx = future.index[-1]
-                exit_price = future.iloc[-1]['Close']
+                try:
+                    exit_price = float(future.iloc[-1]['Close'])
+                except (TypeError, ValueError):
+                    exit_price = None
+
+            if pd.isna(entry_price) or pd.isna(exit_price):
+                continue  # skip if invalid prices
 
             hold_days = (exit_idx - entry_date).days
             pnl = exit_price - entry_price
