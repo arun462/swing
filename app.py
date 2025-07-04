@@ -40,16 +40,16 @@ if symbol:
         for buy_idx in data.index[data['BuySignal']]:
             entry_date = buy_idx
             entry_price = data.loc[entry_date, 'Close']
-            future = data.loc[entry_date:].head(20)  # up to 20 days lookahead
+            future = data.loc[entry_date:].head(20)  # look ahead up to 20 trading days
             exit_idx, exit_price = None, None
 
-         for tup in future.itertuples():
-    if None in (getattr(tup, "RSI", None), getattr(tup, "EMA20", None), getattr(tup, "EMA50", None)):
-        continue  # skip rows missing indicators
-    if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
-        exit_idx = tup.Index
-        exit_price = tup.Close
-        break
+            for tup in future.itertuples():
+                if None in (getattr(tup, "RSI", None), getattr(tup, "EMA20", None), getattr(tup, "EMA50", None)):
+                    continue  # skip rows missing indicators
+                if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
+                    exit_idx = tup.Index
+                    exit_price = tup.Close
+                    break
 
             if exit_idx is None:
                 exit_idx = future.index[-1]
