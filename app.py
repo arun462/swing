@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(
     filename="swing_trade_analyzer.log",
@@ -11,7 +12,8 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
-st.title("🔍 NSE Swing Trade Analyzer — Live Constituents from NSE")
+st.set_page_config(page_title="NSE Swing Trade Analyzer", layout="wide")
+st.title("🔍 NSE Swing Trade Analyzer — Live from NSE")
 
 st.sidebar.header("Market Cap Groups")
 analyze_large = st.sidebar.checkbox("NIFTY50 (Large Cap)", value=True)
@@ -50,6 +52,10 @@ if not groups:
     st.warning("Please select at least one group in the sidebar.")
     st.stop()
 
+@st.cache_data(show_spinner=False, ttl=86400)  # cache for 1 day
+def download_stock_data(symbol):
+    return yf.download(symbol, period="6mo", interval="1d", progress=False)
+
 def ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
 
@@ -62,64 +68,77 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+def analyze_symbol(symbol):
+    st.subheader(f"🔹 {symbol}")
+    data = download_stock_data(symbol)
+    if data.empty:
+        st.warning(f"No data for {symbol}. Skipping.")
+        return None
+
+    data['EMA20'] = ema(data['Close'], 20)
+    data['EMA50'] = ema(data['Close'], 50)
+    data['RSI'] = rsi(data['Close'])
+    data = data.dropna()
+
+    buy_signals = (
+        (data['EMA20'] > data['EMA50']) &
+        (data['EMA20'].shift(1) <= data['EMA50'].shift(1)) &
+        (data['RSI'] > 40)
+    )
+    data['BuySignal'] = buy_signals
+
+    swing_trades = []
+    for buy_idx in data.index[data['BuySignal']]:
+        entry_date = buy_idx
+        entry_price = float(data.loc[entry_date, 'Close'])
+
+        future = data.loc[entry_date:].head(20)
+        exit_idx, exit_price = None, None
+
+        for tup in future.itertuples():
+            if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
+                exit_idx = tup.Index
+                exit_price = float(tup.Close)
+                break
+
+        if exit_idx is None:
+            exit_idx = future.index[-1]
+            exit_price = float(future.iloc[-1]['Close'])
+
+        hold_days = (exit_idx - entry_date).days
+        pnl = exit_price - entry_price
+
+        swing_trades.append({
+            'Entry Date': entry_date.strftime('%Y-%m-%d'),
+            'Entry Price': round(entry_price, 2),
+            'Exit Date': exit_idx.strftime('%Y-%m-%d'),
+            'Exit Price': round(exit_price, 2),
+            'Holding Days': hold_days,
+            'PnL': round(pnl, 2)
+        })
+
+    if swing_trades:
+        trades_df = pd.DataFrame(swing_trades)
+        st.dataframe(trades_df)
+    else:
+        st.info(f"No swing trades detected for {symbol}.")
+
+    return symbol
+
+max_workers = 10  # adjust based on your hosting limits
+
 for group_name, symbols in groups.items():
     st.header(f"📊 Analysis for {group_name}")
-    for symbol in symbols:
-        st.subheader(f"🔹 {symbol}")
-        try:
-            data = yf.download(symbol, period="6mo", interval="1d", progress=False)
-            if data.empty:
-                st.warning(f"No data for {symbol}. Skipping.")
-                continue
 
-            data['EMA20'] = ema(data['Close'], 20)
-            data['EMA50'] = ema(data['Close'], 50)
-            data['RSI'] = rsi(data['Close'])
-            data = data.dropna()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(analyze_symbol, symbol): symbol
+            for symbol in symbols
+        }
 
-            buy_signals = (
-                (data['EMA20'] > data['EMA50']) &
-                (data['EMA20'].shift(1) <= data['EMA50'].shift(1)) &
-                (data['RSI'] > 40)
-            )
-            data['BuySignal'] = buy_signals
-
-            swing_trades = []
-
-            for buy_idx in data.index[data['BuySignal']]:
-                entry_date = buy_idx
-                entry_price = float(data.loc[entry_date, 'Close'])
-
-                future = data.loc[entry_date:].head(20)
-                exit_idx, exit_price = None, None
-
-                for tup in future.itertuples():
-                    if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
-                        exit_idx = tup.Index
-                        exit_price = float(tup.Close)
-                        break
-
-                if exit_idx is None:
-                    exit_idx = future.index[-1]
-                    exit_price = float(future.iloc[-1]['Close'])
-
-                hold_days = (exit_idx - entry_date).days
-                pnl = exit_price - entry_price
-
-                swing_trades.append({
-                    'Entry Date': entry_date.strftime('%Y-%m-%d'),
-                    'Entry Price': round(entry_price, 2),
-                    'Exit Date': exit_idx.strftime('%Y-%m-%d'),
-                    'Exit Price': round(exit_price, 2),
-                    'Holding Days': hold_days,
-                    'PnL': round(pnl, 2)
-                })
-
-            if swing_trades:
-                trades_df = pd.DataFrame(swing_trades)
-                st.dataframe(trades_df)
-            else:
-                st.info(f"No swing trades detected for {symbol}.")
-
-        except Exception as e:
-            st.error(f"Error analyzing {symbol}: {e}")
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                st.error(f"❌ Error analyzing {symbol}: {e}")
