@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
+import random
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,6 +20,8 @@ st.sidebar.header("Market Cap Groups")
 analyze_large = st.sidebar.checkbox("NIFTY50 (Large Cap)", value=True)
 analyze_mid = st.sidebar.checkbox("NIFTY Midcap150", value=False)
 analyze_small = st.sidebar.checkbox("NIFTY Smallcap250", value=False)
+
+sample_size = st.sidebar.slider("Number of symbols to analyze per group", 1, 50, 10)
 
 groups = {}
 
@@ -52,9 +55,9 @@ if not groups:
     st.warning("Please select at least one group in the sidebar.")
     st.stop()
 
-@st.cache_data(show_spinner=False, ttl=86400)  # cache for 1 day
+@st.cache_data(show_spinner=False, ttl=86400)  # cache downloads for 1 day
 def download_stock_data(symbol):
-    return yf.download(symbol, period="6mo", interval="1d", progress=False)
+    return yf.download(symbol, period="3mo", interval="1d", progress=False)
 
 def ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -125,15 +128,18 @@ def analyze_symbol(symbol):
 
     return symbol
 
-max_workers = 10  # adjust based on your hosting limits
+max_workers = 5  # reduced workers for stability & speed
 
 for group_name, symbols in groups.items():
     st.header(f"📊 Analysis for {group_name}")
 
+    # Randomly sample symbols to analyze
+    sample_symbols = random.sample(symbols, min(sample_size, len(symbols)))
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(analyze_symbol, symbol): symbol
-            for symbol in symbols
+            for symbol in sample_symbols
         }
 
         for future in as_completed(futures):
