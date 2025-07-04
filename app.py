@@ -15,10 +15,8 @@ def ema(series, span):
 # Manual RSI calculation
 def rsi(series, period=14):
     delta = series.diff()
-    gain = np.where(delta > 0, delta, 0)
-    loss = np.where(delta < 0, -delta, 0)
-    gain = pd.Series(gain, index=series.index)
-    loss = pd.Series(loss, index=series.index)
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.rolling(window=period, min_periods=period).mean()
     avg_loss = loss.rolling(window=period, min_periods=period).mean()
     rs = avg_gain / avg_loss
