@@ -3,16 +3,13 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 
-st.title("📈 Swing Trade Finder (Manual Indicators)")
+st.title("📈 Dynamic Swing Trade Analyzer (Manual Indicators)")
 
-# User input for stock symbol
 symbol = st.text_input("Enter NSE stock symbol (e.g., BANKINDIA.NS):", value="BANKINDIA.NS")
 
-# Manual EMA calculation
 def ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
 
-# Manual RSI calculation
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -22,7 +19,6 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# When symbol is entered, fetch and process data
 if symbol:
     data = yf.download(symbol, period="6mo", interval="1d")
     
@@ -30,8 +26,8 @@ if symbol:
         data['EMA20'] = ema(data['Close'], 20)
         data['EMA50'] = ema(data['Close'], 50)
         data['RSI'] = rsi(data['Close'])
+        data = data.dropna()
 
-        # Swing trade signal: EMA20 crosses above EMA50 + RSI > 40
         buy_signals = (
             (data['EMA20'] > data['EMA50']) &
             (data['EMA20'].shift(1) <= data['EMA50'].shift(1)) &
@@ -39,11 +35,57 @@ if symbol:
         )
         data['BuySignal'] = buy_signals
 
-        st.subheader("Detected Swing Trades:")
-        st.dataframe(data[data['BuySignal']])
+        swing_trades = []
 
-        # Optional chart
-        st.subheader("Closing Price & Signals")
-        st.line_chart(data[['Close', 'EMA20', 'EMA50']])
+        for buy_idx in data.index[data['BuySignal']]:
+            entry_date = buy_idx
+            entry_price = data.loc[entry_date, 'Close']
+            # Look ahead up to 20 trading days to find exit
+            future = data.loc[entry_date:].head(20)
+            exit_idx, exit_price = None, None
+            for idx, row in future.iterrows():
+                # Exit if RSI > 70 or EMA20 crosses below EMA50
+                if (row['RSI'] > 70) or (row['EMA20'] < row['EMA50']):
+                    exit_idx = idx
+                    exit_price = row['Close']
+                    break
+            # If no exit in 20 days, assume last available candle
+            if exit_idx is None:
+                exit_idx = future.index[-1]
+                exit_price = future.iloc[-1]['Close']
+
+            hold_days = (exit_idx - entry_date).days
+            pnl = exit_price - entry_price
+
+            swing_trades.append({
+                'Entry Date': entry_date.strftime('%Y-%m-%d'),
+                'Entry Price': round(entry_price, 2),
+                'Exit Date': exit_idx.strftime('%Y-%m-%d'),
+                'Exit Price': round(exit_price, 2),
+                'Holding Days': hold_days,
+                'PnL': round(pnl, 2)
+            })
+
+        if swing_trades:
+            st.subheader("📋 Detected Swing Trades")
+            trades_df = pd.DataFrame(swing_trades)
+            st.dataframe(trades_df)
+
+            avg_hold = trades_df['Holding Days'].mean()
+            avg_pnl = trades_df['PnL'].mean()
+            st.info(f"Average hold period: {avg_hold:.1f} days | Average PnL: ₹{avg_pnl:.2f}")
+        else:
+            st.warning("No swing trades detected in the selected period.")
+
+        cols_to_plot = [col for col in ['Close', 'EMA20', 'EMA50'] if col in data.columns]
+        if cols_to_plot:
+            data_clean = data[cols_to_plot].dropna()
+            if not data_clean.empty:
+                st.subheader("📊 Closing Price & EMAs")
+                st.line_chart(data_clean)
+            else:
+                st.warning("Not enough data to plot after cleaning.")
+        else:
+            st.warning("No columns available for plotting.")
     else:
-        st.warning("No data found for the symbol. Please check your input.")
+        st.warning("No data found for this symbol. Check your input.")
