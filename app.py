@@ -40,16 +40,14 @@ if symbol:
         for buy_idx in data.index[data['BuySignal']]:
             entry_date = buy_idx
             entry_price = data.loc[entry_date, 'Close']
-            # Look ahead up to 20 trading days to find exit
-            future = data.loc[entry_date:].head(20)
+            future = data.loc[entry_date:].head(20)  # up to 20 days lookahead
             exit_idx, exit_price = None, None
-            for idx, row in future.iterrows():
-                # Exit if RSI > 70 or EMA20 crosses below EMA50
-                if (row['RSI'] > 70) or (row['EMA20'] < row['EMA50']):
-                    exit_idx = idx
-                    exit_price = row['Close']
+
+            for tup in future.itertuples():
+                if (tup.RSI > 70) or (tup.EMA20 < tup.EMA50):
+                    exit_idx = tup.Index
+                    exit_price = tup.Close
                     break
-            # If no exit in 20 days, assume last available candle
             if exit_idx is None:
                 exit_idx = future.index[-1]
                 exit_price = future.iloc[-1]['Close']
